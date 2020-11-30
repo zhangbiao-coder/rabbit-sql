@@ -15,7 +15,6 @@ public final class Param {
      *
      * @param value 值 (可以是明确的值或包装值)
      * @return param
-     * @see ValueWrap
      */
     public static Param IN(Object value) {
         Param param = new Param();
@@ -43,26 +42,12 @@ public final class Param {
      * @param value 入参值 (可以是明确的值或包装值)
      * @param type  出参类型
      * @return param
-     * @see ValueWrap
      */
     public static Param IN_OUT(Object value, IOutParam type) {
         Param param = new Param();
         param.paramMode = ParamMode.IN_OUT;
         param.type = type;
         param.value = value;
-        return param;
-    }
-
-    /**
-     * 指定SQL模版代码段插入到指定位置
-     *
-     * @param template SQL模版
-     * @return param
-     */
-    public static Param TEMPLATE(String template) {
-        Param param = new Param();
-        param.paramMode = ParamMode.TEMPLATE;
-        param.value = template;
         return param;
     }
 
@@ -80,6 +65,19 @@ public final class Param {
 
     @Override
     public String toString() {
-        return value.toString();
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        if (value != null)
+            sb.append("value=")
+                    .append(value)
+                    .append(", ");
+        if (type != null)
+            sb.append("type=")
+                    .append(type.getName())
+                    .append(", ");
+        sb.append("mode=")
+                .append(paramMode)
+                .append("}");
+        return sb.toString();
     }
 }

@@ -2,16 +2,15 @@
 /*[query]*/
 select ${field}
 from test."user" t --用户表
-/*啊啊bbb啊啊*/
-    ${part1};
+    ${x.part1};
 
 /*插入语句。*/
-/*[insert]*/
+/*  [   great.insert  ]  */
 insert into test."user" (id, name, password)
 values (:id, :name, :password);
 
 /*第一部分*/
-/*{part1}*/
+/*{x.part1}  */
 where id = :id
 ${order};
 
@@ -23,13 +22,44 @@ t.id,t.name,t.password;
 /*排序*/
 order by id;
 
-/*[select_all]*/
+/*[select_user]*/
 select *
-from test.user;
+from test.user where id < :id;
 
 /*[fruit]*/
 select *
-from test.student;
+from test.student where ${cnd};
 
 /*[fruitCount]*/
-select count(*) from test.student;
+select count(*)
+from test.student;
+
+/*[logical]*/
+select *
+from test.student t
+WHERE
+--#if :age !=null
+t.age > 21
+--#fi
+--#if :name != null
+and t.name ~ :name
+--#fi
+--#if :age <> blank && :age < 90
+and age < 90
+--#fi
+;
+
+/* [ update ] */
+update test.user
+set
+--#if :name <> blank
+name = :name,
+--#fi
+--#if :age <100
+age = :age,
+--#fi
+--#if :address != null
+address = :address
+--#fi
+where id = 10
+;

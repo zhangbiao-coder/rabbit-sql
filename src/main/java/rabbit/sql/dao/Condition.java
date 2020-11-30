@@ -3,41 +3,21 @@ package rabbit.sql.dao;
 import rabbit.common.tuple.Pair;
 import rabbit.sql.support.ICondition;
 import rabbit.sql.support.IFilter;
-import rabbit.sql.types.Order;
-import rabbit.sql.types.Param;
-import rabbit.sql.types.ValueWrap;
 import rabbit.sql.utils.SqlUtil;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static rabbit.sql.utils.SqlUtil.unWrapValue;
 
 /**
  * SQL条件拼装器
  */
 public class Condition implements ICondition {
-    private final Map<String, Param> params = new HashMap<>();
-
-    private final StringBuilder where = new StringBuilder();
+    private final Map<String, Object> args = new HashMap<>();
+    private final StringBuilder conditions = new StringBuilder();
     private int arg_index = 0;
-    private List<String> orders;
 
-    private Condition() {
+    Condition() {
 
-    }
-
-    /**
-     * 创建一个新的条件拼接器
-     *
-     * @return 条件拼接器
-     */
-    public static Condition New() {
-        return new Condition();
     }
 
     /**
@@ -46,39 +26,29 @@ public class Condition implements ICondition {
      * @param filter 过滤器
      * @return 条件拼接器
      */
-    public Condition where(IFilter filter) {
-        if (filter.getValue() != IFilter.IGNORE_VALUE) {
-            Pair<String, String> sf = getSpecialField(filter.getField(), filter.getValue());
-            where.append(" where ").append(filter.getField()).append(filter.getOperator()).append(sf.getItem2());
-            params.put(sf.getItem1(), Param.IN(unWrapValue(filter.getValue())));
-        } else {
-            where.append(" where ").append(filter.getField()).append(filter.getOperator());
-        }
-        return this;
+    public static Condition where(IFilter filter) {
+        Condition cnd = new Condition();
+        return cnd.concatFilterBy("", filter);
     }
 
     /**
-     * 排序
+     * where
      *
-     * @param field 字段名
+     * @param sql sql字符串
      * @return 条件拼接器
      */
-    public Condition orderBy(String field) {
-        return orderBy(field, Order.ASC);
+    public static Condition where(String sql) {
+        return new Condition().expression(sql);
     }
 
     /**
-     * 排序
+     * 一段原生sql表达式
      *
-     * @param field 字段名
-     * @param order 排序枚举
+     * @param sql sql
      * @return 条件拼接器
      */
-    public Condition orderBy(String field, Order order) {
-        if (orders == null) {
-            orders = new ArrayList<>();
-        }
-        orders.add(field + " " + order.getValue());
+    public Condition expression(String sql) {
+        conditions.append(" ").append(sql).append(" ");
         return this;
     }
 
@@ -86,22 +56,20 @@ public class Condition implements ICondition {
      * and
      *
      * @param filter 过滤器
-     * @param more   更多过滤器
      * @return 条件拼接器
      */
-    public Condition and(IFilter filter, IFilter... more) {
-        return concatFilterBy(" and ", filter, more);
+    public Condition and(IFilter filter) {
+        return concatFilterBy("and ", filter);
     }
 
     /**
      * or
      *
      * @param filter 过滤器
-     * @param more   更多过滤器
      * @return 条件拼接器
      */
-    public Condition or(IFilter filter, IFilter... more) {
-        return concatFilterBy(" or ", filter, more);
+    public Condition or(IFilter filter) {
+        return concatFilterBy("or ", filter);
     }
 
     /**
@@ -109,33 +77,19 @@ public class Condition implements ICondition {
      *
      * @param s      连接字符串
      * @param filter 过滤器
-     * @param more   更多过滤器
      * @return 条件拼接器
      */
-    private Condition concatFilterBy(String s, IFilter filter, IFilter... more) {
-        if (more.length == 0) {
-            if (filter.getValue() != IFilter.IGNORE_VALUE) {
-                Pair<String, String> sf = getSpecialField(filter.getField(), filter.getValue());
-                where.append(s).append(filter.getField()).append(filter.getOperator()).append(sf.getItem2());
-                params.put(sf.getItem1(), Param.IN(unWrapValue(filter.getValue())));
-            } else {
-                where.append(s).append(filter.getField()).append(filter.getOperator());
-            }
-            return this;
+    private Condition concatFilterBy(String s, IFilter filter) {
+        if (!IFilter.IGNORE_VALUE.equals(filter.getValue())) {
+            Pair<String, String> sf = getSpecialField(filter.getField());
+            conditions.append(s)
+                    .append(filter.getField())
+                    .append(filter.getOperator())
+                    .append(sf.getItem2()).append(" ");
+            args.put(sf.getItem1(), filter.getValue());
+        } else {
+            conditions.append(s).append(filter.getField()).append(filter.getOperator());
         }
-        IFilter[] filters = new IFilter[1 + more.length];
-        filters[0] = filter;
-        System.arraycopy(more, 0, filters, 1, more.length);
-        String childAndGroup = Stream.of(filters).map(f -> {
-            if (f.getValue() != IFilter.IGNORE_VALUE) {
-                Pair<String, String> sf = getSpecialField(f.getField(), f.getValue());
-                String and = f.getField() + f.getOperator() + sf.getItem2();
-                params.put(sf.getItem1(), Param.IN(unWrapValue(f.getValue())));
-                return and;
-            }
-            return f.getField() + f.getOperator();
-        }).collect(Collectors.joining(s));
-        where.append(s).append("( ").append(childAndGroup).append(")");
         return this;
     }
 
@@ -143,28 +97,36 @@ public class Condition implements ICondition {
      * 获取经过特殊字符和自动编号处理的字段名占位符
      *
      * @param field 字段名
-     * @param value 字段值
      * @return (字段名, 字段名占位符)
      */
-    private Pair<String, String> getSpecialField(String field, Object value) {
-        String s = field + "_" + SqlUtil.SEP + arg_index++;
-        if (value instanceof ValueWrap) {
-            ValueWrap wrapV = (ValueWrap) value;
-            return Pair.of(s, wrapV.getStart() + " :" + s + wrapV.getEnd());
-        }
+    private Pair<String, String> getSpecialField(String field) {
+        String s = field + SqlUtil.SEP + arg_index++;
         return Pair.of(s, ":" + s);
     }
 
+    /**
+     * 获取参数
+     *
+     * @return 参数
+     */
     @Override
-    public Map<String, Param> getParams() {
-        return params;
+    public Map<String, Object> getArgs() {
+        return args;
     }
 
+    /**
+     * 获取拼接的where子句
+     *
+     * @return where子句
+     */
     @Override
-    public String getString() {
-        if (orders == null) {
-            return where.toString();
+    public String getSql() {
+        String cnds = conditions.toString();
+        if (cnds.startsWith("and ")) {
+            cnds = cnds.substring(4);
+        } else if (cnds.startsWith("or ")) {
+            cnds = cnds.substring(3);
         }
-        return where.toString() + " order by " + String.join(", ", orders);
+        return "\n where " + cnds;
     }
 }

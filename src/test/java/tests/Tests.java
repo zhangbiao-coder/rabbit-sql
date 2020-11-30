@@ -8,58 +8,100 @@ import org.nutz.dao.entity.Record;
 import org.nutz.json.Json;
 import rabbit.common.tuple.Pair;
 import rabbit.common.types.DataRow;
-import rabbit.common.utils.ResourceUtil;
-import rabbit.common.utils.StringUtil;
-import rabbit.sql.dao.Condition;
-import rabbit.sql.dao.Filter;
-import rabbit.sql.support.IFilter;
-import rabbit.sql.support.SQLFileManager;
-import rabbit.sql.page.AbstractPageHelper;
+import rabbit.common.types.ImmutableList;
+import rabbit.common.utils.DateTimes;
+import rabbit.sql.dao.*;
 import rabbit.sql.page.impl.OraclePageHelper;
-import rabbit.sql.page.Pageable;
-import rabbit.sql.types.Order;
+import rabbit.sql.page.PagedResource;
+import rabbit.sql.dao.Args;
+import rabbit.sql.types.Ignore;
 import rabbit.sql.types.Param;
-import rabbit.sql.dao.Params;
-import rabbit.sql.types.ValueWrap;
 import rabbit.sql.utils.SqlUtil;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URISyntaxException;
-import java.nio.file.Path;
-import java.sql.Date;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.time.*;
+import java.util.*;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import static rabbit.sql.utils.SqlUtil.SEP;
 
 public class Tests {
 
-    static class JsonIncludeFilter implements IFilter {
+    @Test
+    public void dtTest() throws Exception {
+        System.out.println(new java.sql.Time(DateTimes.toEpochMilli("2020-12-11 11:22:33")));
+        System.out.println(LocalDateTime.class.getTypeName());
+    }
 
-        @Override
-        public String getField() {
-            return "json";
-        }
+    @Test
+    public void dtTest2() throws Exception {
+        String ts = "12月11 23:12:55";
+        String dt = "2020-12-11";
+        String tm = "23时12分55秒";
 
-        @Override
-        public String getOperator() {
-            return " @> ";
-        }
+        System.out.println(DateTimes.toDate(ts));
+    }
 
-        @Override
-        public Object getValue() {
-            return "'{aaa}'";
+    @Test
+    public void formatDt() throws Exception {
+        System.out.println(DateTimes.of(new Date()).toString("yyyy年MM月dd日 HH:mm:ss"));
+        for (int i = 0; i < 12; i++) {
+            System.out.println(new Date(LocalDateTime.now().plusMonths(i).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()));
         }
     }
 
+    @Test
+    public void Datarows() throws Exception {
+        Map<Integer, Object> map = new HashMap<>();
+        map.put(1, "a");
+        map.put(2, "2");
+        map.put(3, false);
+        map.put(4, 10.01);
+
+        DataRow row = DataRow.fromMap(map);
+
+    }
+
+    private static ImmutableList<Integer> immutableList;
+
     @BeforeClass
     public static void init() {
+        final List<Integer> list = new ArrayList<>();
+        for (int i = 0; i < 100000; i++) {
+            list.add(i);
+        }
+        immutableList = ImmutableList.of(list);
+    }
 
+    @Test
+    public void sqlTest() throws Exception {
+        String sql = "select id, filename, title\n" +
+                "from test.user\n" +
+                "where\n" +
+                "--#if :title <> blank\n" +
+                "and title = :title\n" +
+                "--#fi\n" +
+                "order by sj desc";
+        String dq = SqlUtil.dynamicSql(sql, Args.of("title", "op"));
+        System.out.println(dq);
+        System.out.println(SqlUtil.generateCountQuery(dq));
+    }
+
+    @Test
+    public void iteratorTest() throws Exception {
+        while (immutableList.hasNext()) {
+            System.out.println(immutableList.next());
+        }
+    }
+
+    @Test
+    public void lambdaTest() throws Exception {
+        immutableList.foreach(System.out::println);
     }
 
     @Test
@@ -75,86 +117,86 @@ public class Tests {
 
     @Test
     public void sqlReplace() throws Exception {
-        String str = "select t.id || 'number' || 'age:age,name:cyx', '{\"name\":\"user\"}'::jsonb " +
-                "from test.user " +
-                "where id = :id::integer and id > :idc and name=text :username";
+        String str = "select t.id || 'number' || 'age:age,name:cyx', '{\"name\":\"user\"}'::jsonb from test.user where id =:id::integer and id >:idc and name=text :username";
+        String upd = "update test.score set grade =  :grade::integer" +
+                " where id =   :id_˞0::integer::integer or id >   :id_˞1::integer::integer";
 
-//        String sql = "insert into test.user(idd,name,id,age,address) values (:id,:name::integer,:idd" + SEP + "::float,integer :age,date :address)";
+        String sql = "insert into test.user(idd,name,id,age,address) values (:id,:name::integer,:idd" + SEP + "::float,integer :age,date :address)";
 //        String sql2 = "select * from test.user where id = '1' and tag = '1' and num = '1' and name = :name";
 //        String jsonSql = "select '{\"a\":[1,2,3],\"b\":[4,5,6]}'::json #>> '{b,1}'";
-        Pair<String, List<String>> pair = SqlUtil.getPreparedSqlAndIndexedArgNames(str);
+        Pair<String, List<String>> pair = SqlUtil.getPreparedSql(sql);
         System.out.println(pair.getItem1());
         System.out.println(pair.getItem2());
     }
 
     @Test
-    public void CndTest() throws Exception {
-        Condition condition = Condition.New().where(Filter.eq("id", 5))
-                .and(Filter.gt("age", ValueWrap.wrapEnd(26, "::text")))
-                .and(Filter.eq("name", "chengyuxing"), Filter.isNotNull("address"))
-                .or(Filter.endsWith("name", "jack"))
-                .and(Filter.gt("id", ValueWrap.wrapStart("interval", "7 minutes")))
-                .and(new JsonIncludeFilter())
-                .orderBy("id")
-                .orderBy("px", Order.DESC);
-
-        Map<String, Param> params = Params.builder()
-                .putIn("name", "cyx")
-                .putIn("age", ValueWrap.wrapEnd("21", "::integer"))
-                .putIn("time", ValueWrap.wrapStart("timestamp", "1993-5-10"))
-                .build();
-
-        String insert = SqlUtil.generateInsert("test.user", params);
-        String update = SqlUtil.generateUpdate("test.user", params);
-
-        System.out.println(condition.getString());
-        System.out.println(condition.getParams());
-
-        System.out.println(insert);
-        System.out.println(update);
+    public void regex() throws Exception {
+        Matcher m = SqlUtil.ARG_PATTERN.matcher(":now = call test.now()");
+        while (m.find()) {
+            System.out.println(m.group("name"));
+        }
     }
 
     @Test
-    public void replaceTest() throws Exception {
-        Map<String, Object> args = new HashMap<>();
-        args.put("name", ValueWrap.wrapEnd("cyx", "::text"));
-        args.put("age", ValueWrap.wrapStart("integer", 26));
-        args.put("address", "kunming");
+    public void regexTest() throws Exception {
+        String str = "select t.id || 'number' || 'age:age,name:cyx', '{\"name\":\"user\"}'::jsonb from test.user where id =:id::integer and id >:idc and name=text:username";
 
-        AtomicReference<String> sql = new AtomicReference<>("select * from test.user where id = :id and name = :name or age = :age");
+        Pattern pattern = Pattern.compile("[^:]:(?<name>[\\w.]+)");
+        Matcher matcher = pattern.matcher(str);
+        while (matcher.find()) {
+            System.out.println(matcher.group("name"));
+        }
+    }
 
-        args.keySet().forEach(k -> {
-            if (args.get(k) instanceof ValueWrap) {
-                ValueWrap v = (ValueWrap) args.get(k);
-                sql.set(sql.get().replace(":" + k, v.getStart() + " :" + k + v.getEnd()));
-            }
-        });
-        System.out.println(sql.get());
+    @Test
+    public void orderByTest() throws Exception {
+        String a = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        String b = a.toLowerCase();
+        for (int i = 0; i < a.length(); i++) {
+            System.out.print((int) a.charAt(i) + ", ");
+        }
+        System.out.println();
+        for (int i = 0; i < a.length(); i++) {
+            System.out.print((int) b.charAt(i) + ", ");
+        }
+    }
+
+    public static void printMap(Map<String, Param> map) {
+        System.out.println(map);
+    }
+
+    @Test
+    public void generateSql() throws Exception {
+        Args<Object> paramMap = Args.create()
+                .add("a", "cyx")
+                .add("b", "v")
+                .add("c", "")
+                .add("d", null)
+                .add("e", "1");
+
+//        String sql = SqlUtil.generateInsert("test.user", paramMap, Ignore.BLANK, Arrays.asList("c", "d", "a"));
+
+        String upd = SqlUtil.generateUpdate("test.user", paramMap);
+        System.out.println(upd);
     }
 
     @Test
     public void recordTest() throws Exception {
-        Record record = new Record();
-        record.put("name", "cyx");
-        System.out.println(record.getString("age"));
-    }
+        Map<String, Object> map = new HashMap<>();
+        map.put("a", 1);
+        map.put("b", 1);
+        map.put("c", 1);
+        map.put("d", 1);
+        map.put("e", 1);
+        Set<String> strings = new HashSet<>(map.keySet());
 
-    @Test
-    public void testFile() throws IOException, URISyntaxException {
-        Path p = ResourceUtil.getClassPathResources("pgsql/data.sql", ".sql")
-                .findFirst().get();
-        System.out.println(p);
-    }
-
-    @Test
-    public void javaType() throws Exception {
-        byte[] bytes = new byte[1];
-        System.out.println(Date.class.getName());
-
-        String[] names = new String[]{"name", "age", "boy"};
-        Object[] values = new Object[]{"chengyuxing", 26, true};
-        DataRow row = DataRow.of(names, values);
-        System.out.println(row);
+        Iterator<String> iterator = strings.iterator();
+        if (iterator.hasNext()) {
+            String v = iterator.next();
+            iterator.remove();
+        }
+        System.out.println(strings);
+        System.out.println(map);
     }
 
     @Test
@@ -178,7 +220,6 @@ public class Tests {
     public void SqlFileTest() throws IOException, URISyntaxException {
         SQLFileManager manager = new SQLFileManager("pgsql");
         manager.init();
-        manager.look();
         System.out.println("----");
         System.out.println(manager.get("data.query"));
     }
@@ -196,17 +237,42 @@ public class Tests {
 
     @Test
     public void asd() throws Exception {
-        System.out.println(StringUtil.moveSpecialChars("test.user      t"));
+
+    }
+
+    @Test
+    public void trimEnds() throws Exception {
+        System.out.println(SqlUtil.trimEnd("where id = 10\r\n;  ;;;\t\r\n"));
+    }
+
+    @Test
+    public void sql() throws Exception {
+        String sql = "with recursive cte(id, name, pid) as (\n" +
+                "    select id, name, pid\n" +
+                "    from test.region\n" +
+                "    where id = 4\n" +
+                "    union all\n" +
+                "    select t.id, t.name, t.pid\n" +
+                "    from cte c,\n" +
+                "         test.region t\n" +
+                "    where t.pid = c.id\n" +
+                ")\n" +
+                "select *\n" +
+                "from cte;";
+        String cq = SqlUtil.generateCountQuery(sql);
+        System.out.println(cq);
     }
 
     @Test
     public void pageTest() throws Exception {
-        AbstractPageHelper page = OraclePageHelper.of(12, 10);
-        page.init(100);
-        Pageable<Integer> pageable = Pageable.of(page, Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9));
-        System.out.println(pageable);
-        System.out.println(Json.toJson(pageable));
+        OraclePageHelper page = new OraclePageHelper();
+        page.init(5, 12, 100);
+        System.out.println(page.start());
+        System.out.println(page.end());
+        PagedResource<Integer> pagedResource = PagedResource.of(page, Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9));
+        System.out.println(pagedResource);
+        System.out.println(Json.toJson(pagedResource));
         ObjectMapper mapper = new ObjectMapper();
-        System.out.println(mapper.writeValueAsString(pageable));
+        System.out.println(mapper.writeValueAsString(pagedResource));
     }
 }

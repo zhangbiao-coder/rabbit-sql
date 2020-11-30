@@ -13,12 +13,12 @@ public interface ICondition {
      *
      * @return 参数
      */
-    Map<String, Param> getParams();
+    Map<String, Object> getArgs();
 
     /**
      * 获取条件sql字符串
      *
      * @return sql
      */
-     String getString();
+    String getSql();
 }

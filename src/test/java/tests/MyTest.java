@@ -1,76 +1,167 @@
 package tests;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariDataSource;
 import func.FCondition;
 import func.FFilter;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.nutz.json.Json;
+import org.postgresql.util.PGobject;
 import rabbit.common.types.DataRow;
-import rabbit.sql.dao.Condition;
-import rabbit.sql.dao.Filter;
-import rabbit.sql.dao.LightDao;
-import rabbit.sql.Light;
-import rabbit.sql.support.SQLFileManager;
-import rabbit.sql.page.Pageable;
-import rabbit.sql.page.impl.PGPageHelper;
+import rabbit.sql.dao.*;
+import rabbit.sql.page.PagedResource;
+import rabbit.sql.support.ICondition;
+import rabbit.sql.support.IOutParam;
 import rabbit.sql.transaction.Tx;
+import rabbit.sql.dao.Args;
+import rabbit.sql.types.DataFrame;
 import rabbit.sql.types.OUTParamType;
-import rabbit.sql.types.Order;
 import rabbit.sql.types.Param;
-import rabbit.sql.dao.Params;
+import rabbit.sql.utils.JdbcUtil;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.net.URISyntaxException;
 import java.sql.*;
 import java.util.*;
 import java.util.stream.Stream;
 
-import static rabbit.sql.utils.SqlUtil.getPreparedSqlAndIndexedArgNames;
 
 public class MyTest {
 
-    private static Light light;
-    private static Light light2;
+    private static BakiDao baki;
+    private static BakiDao baki2;
     private static HikariDataSource dataSource;
     private static HikariDataSource dataSource2;
+
+    private static final ObjectMapper json = new ObjectMapper();
 
     @BeforeClass
     public static void init() throws IOException, URISyntaxException {
         dataSource = new HikariDataSource();
         dataSource.setJdbcUrl("jdbc:postgresql://127.0.0.1:5432/postgres");
         dataSource.setUsername("chengyuxing");
-        dataSource.setDriverClassName("org.postgresql.Driver");
 
         SQLFileManager manager = new SQLFileManager("pgsql/data.sql");
 
-        LightDao lightDao = LightDao.of(dataSource);
-        lightDao.setSqlFileManager(manager);
-        light = lightDao;
-        light2 = LightDao.of(dataSource);
-//        lightDao.setSqlPath("pgsql");
-//        light2 = new LightDao(dataSource2);
+        BakiDao bakiDao = BakiDao.of(dataSource);
+        bakiDao.setSqlFileManager(manager);
+        baki = bakiDao;
+        baki2 = BakiDao.of(dataSource);
+//        bakiDao.setSqlPath("pgsql");
+//        baki2 = new BakiDao(dataSource2);
+    }
+
+    @Test
+    public void selectTest() throws Exception {
+        baki.fetch("select * from test.tb where blob is not null")
+                .ifPresent(System.out::println);
+    }
+
+    @Test
+    public void inserts() throws Exception {
+        baki.execute("insert into test.tb(strs)\n" +
+                "values ('{a,b,c}')");
+    }
+
+    @Test
+    public void toEntity() throws Exception {
+        baki.fetch("select * from test.tb")
+                .ifPresent(row -> {
+                    Tb tb = row.toEntity(Tb.class);
+                    System.out.println(tb);
+                    System.out.println(tb.getStrs().get(0));
+                    System.out.println(tb.getDt());
+                });
+    }
+
+    @Test
+    public void testFieldCase() throws Exception {
+        baki.query("select 1 A, 2 \"B\", current_date DT, now() \"NoW\"")
+                .forEach(System.out::println);
+    }
+
+    @Test
+    public void insert() throws Exception {
+        DataFrame dataFrame = DataFrame.of("test.tb", Args.create()
+                .add("ts", "2020年2月12日 11:22:33")
+                .add("dtm", "")
+                .add("tm", "23时55分13秒")
+                .add("bak", "ccc"))
+                .strict(false);
+        baki.insert(dataFrame);
+    }
+
+    @Test
+    public void inertEntity() throws Exception {
+
+        Me me = new Me();
+        me.setAge(25);
+        me.setName("entity");
+        DataFrame frame = DataFrame.of("test.tb", Args.of("jsb", me));
+        baki.insert(frame);
+    }
+
+    @Test
+    public void insertFile() throws FileNotFoundException {
+        baki.insert(DataFrame.of("test.tb", Args.of("blob", new FileInputStream("/Users/chengyuxing/Downloads/istatmenus6.40.zip"))));
+    }
+
+    @Test
+    public void executeAny() throws Exception {
+        DataRow row = baki.execute("(select current_date, current_time)");
+        System.out.println(row);
+        row.<List<DataRow>>get(0)
+                .forEach(System.out::println);
+
+//        DataRow row1 = baki.execute("insert into test.tb(a,b) values (:a,:b)", Args.<Object>of("a", 5).add("b", 5));
+//        System.out.println(row1);
+//
+//        DataRow row2 = baki.execute("create index idx_a on test.tb(a)");
+//        System.out.println(row2);
+    }
+
+    @Test
+    public void pagerTest() throws Exception {
+        PagedResource<DataRow> res = baki.<DataRow>query("&pgsql.data.select_user", 1, 10)
+                .args(Args.create().add("id", 35))
+                .collect(d -> d);
+        System.out.println(res);
+    }
+
+    @Test
+    public void dynamicSqlTest() throws Exception {
+        try (Stream<DataRow> s = baki.query("&pgsql.data.logical", Args.create()
+                .add("age", 91)
+                .add("name", "小"))) {
+            s.forEach(System.out::println);
+        }
+    }
+
+    @Test
+    public void jdbcTest() throws Exception {
+        System.out.println(JdbcUtil.supportsNamedParameters(dataSource.getConnection()));
     }
 
     @Test
     public void array() throws Exception {
-        light.fetch("select array [1,2,3.3,5.67,8]:: integer[]", r -> r)
+        baki.fetch("select array [12,13,11,4,5,6.7]:: varchar[], '{\"a\":\"chengyuxing\"}'::jsonb")
                 .ifPresent(r -> {
+                    System.out.println(r);
+                    System.out.println(r.getType(0));
 
-                    Array arr = r.get(0);
-                    try {
-                        Integer[] ints = (Integer[]) arr.getArray();
-                        System.out.println(Arrays.toString(ints));
-                    } catch (SQLException e) {
-                        e.printStackTrace();
-                    }
+//                        Array arr = r.get(0);
+//                        Integer[] ints = (Integer[]) arr.getArray();
+//                        System.out.println(Arrays.toString(ints));
                 });
     }
 
     @Test
     public void loadData() throws Exception {
-        light.execute("copy test.fruit from '/Users/chengyuxing/test/fruit2.txt' with delimiter ','");
-//        light.execute("copy test.fruit from '/Users/chengyuxing/test/fruit2.txt' with delimiter ','");
+        baki.execute("copy test.fruit from '/Users/chengyuxing/test/fruit2.txt' with delimiter ','");
+//        baki.execute("copy test.fruit from '/Users/chengyuxing/test/fruit2.txt' with delimiter ','");
     }
 
     @Test
@@ -80,39 +171,23 @@ public class MyTest {
         map.put("productplace", "bbb");
         map.put("price", 1000);
 
-        int i = light.insert("test.fruit", Params.from(map));
+        int i = baki.insert(DataFrame.of("test.fruit", map));
         System.out.println(i);
     }
 
     @Test
     public void pageTest() throws Exception {
-        for (int i = 0; i < 5; i++) {
-            Pageable<Map<String, Object>> res = light.query("&data.select_all",
-                    DataRow::toMap,
-                    PGPageHelper.of(1, 10));
-//            System.out.println(res);
-            System.out.println(Json.toJson(Json.toJson(res)));
-//            TimeUnit.SECONDS.sleep(10);
-        }
-    }
-
-    @Test
-    public void pageTest2() {
-        Pageable<Map<String, Object>> pageable = light.query(
-                "&data.fruit",
-//                "select count(1) from test.student t",
-                DataRow::toMap,
-//                Params.empty(),
-                Condition.New().where(Filter.lt("age", 27)),
-                PGPageHelper.of(1, 10));
-        System.out.println(pageable);
+        baki.query("select * from test.region")
+                .skip(5)
+                .limit(10)
+                .map(r -> String.join("<>", r.getNames()))
+                .forEach(System.out::println);
     }
 
     @Test
     public void manager() throws Exception {
         SQLFileManager manager = new SQLFileManager("pgsql");
         manager.init();
-        manager.look();
     }
 
     @Test
@@ -127,22 +202,18 @@ public class MyTest {
 
     @Test
     public void TestMultiDs() throws SQLException {
-        light.query("select * from test.user where id --用户ID\n" +
-                " = 3;", r -> r, -1).forEach(System.out::println);
+        baki.query("select * from test.user where id --用户ID\n" +
+                " = 3;").forEach(System.out::println);
 //        xDao2.query("select * from user;", DataRow::toMap, -1).forEach(System.out::println);
     }
 
     @Test
     public void testSqlFile() {
-
-        light.query("&data.query", r -> r, Params.builder()
-                .put("id", Param.IN(3))
-//                .put("cnd", Param.TEMPLATE("order by id"))
-                .build())
-                .forEach(System.out::println);
-
-        light.query("select * from test.user where id --用户ID\n" +
-                " = 3;", r -> r, -1).forEach(System.out::println);
+        try (Stream<DataRow> s = baki.query("&data.query",
+                Args.create().add("id", 4))) {
+            s.map(DataRow::toMap)
+                    .forEach(System.out::println);
+        }
     }
 
     @Test
@@ -155,29 +226,97 @@ public class MyTest {
     }
 
     @Test
-    public void testQuery() throws SQLException {
-        light.query("select * from test.user", row -> row,
-                Condition.New().where(Filter.eq("password", "123456"))
-                        .and(Filter.gtEq("id", 4))
-                        .orderBy("id", Order.ASC))
-                .forEach(System.out::println);
+    public void jsonSyntax() throws Exception {
+        String json = "{\n" +
+                "  \"name\": \"json\",\n" +
+                "  \"age\": 21\n" +
+                "}";
+    }
+
+    @Test
+    public void testProcedure() throws Exception {
+        baki.call("call test.transaction()", Args.create());
     }
 
     @Test
     public void testCall() throws Exception {
-        Stream<DataRow> rows = Tx.using(() -> {
-            DataRow row = light.call("call test.fun_query(:c::refcursor)",
-                    Params.builder()
-                            .put("c", Param.IN_OUT("result", OUTParamType.REF_CURSOR))
-                            .build());
+        Tx.using(() -> baki.call("{:res = call test.fun_query()}",
+                Args.of("res", Param.OUT(OUTParamType.REF_CURSOR)))
+                .<List<DataRow>>get(0)
+                .stream()
+                .map(DataRow::toMap)
+                .forEach(System.out::println));
+    }
+
+    @Test
+    public void testCall2() throws Exception {
+        baki.call(":num = call test.get_grade(:id)",
+                Args.of("num", Param.OUT(OUTParamType.INTEGER))
+                        .add("id", Param.IN(5)))
+                .getNullable("num")
+                .ifPresent(System.out::println);
+    }
+
+
+    @Test
+    public void multi_res_function() throws Exception {
+        Tx.using(() -> {
+            DataRow row = baki.call("call test.multi_res(12, :success, :res, :msg)",
+                    Args.of("success", Param.OUT(OUTParamType.BOOLEAN))
+                            .add("res", Param.OUT(OUTParamType.REF_CURSOR))
+                            .add("msg", Param.OUT(OUTParamType.VARCHAR))
+            );
             System.out.println(row);
-            return row.get(0);
         });
-        rows.forEach(System.out::println);
-//        for (int i = 0; i < 10; i++) {
-//            TimeUnit.SECONDS.sleep(10);
-//            System.out.println(i);
-//        }
+    }
+
+    @Test
+    public void parameterMeta() throws Exception {
+        Connection connection = dataSource.getConnection();
+        CallableStatement statement = connection.prepareCall("{call test.func_now(1,2,?,?,?)}");
+        ParameterMetaData metaData = statement.getParameterMetaData();
+        System.out.println(metaData.getParameterTypeName(1));
+        System.out.println(metaData.getParameterTypeName(2));
+        System.out.println(metaData.getParameterTypeName(3));
+        System.out.println(metaData.getParameterTypeName(4));
+        System.out.println(metaData.getParameterTypeName(5));
+    }
+
+    @Test
+    public void callTest() throws Exception {
+        class TIME implements IOutParam {
+
+            @Override
+            public int getTypeNumber() {
+                return Types.TIME;
+            }
+
+            @Override
+            public String getName() {
+                return "time";
+            }
+        }
+        DataRow row = baki.call("{call test.fun_now(:a, :b, :sum, :dt, :tm)}",
+                Args.of("dt", Param.OUT(OUTParamType.TIMESTAMP))
+                        .add("a", Param.IN(11))
+                        .add("b", Param.IN(22))
+                        .add("sum", Param.OUT(OUTParamType.INTEGER))
+                        .add("tm", Param.OUT(new TIME())));
+        Timestamp dt = row.get("dt");
+        System.out.println(dt.toLocalDateTime());
+        System.out.println(row);
+        System.out.println((int) row.get("sum"));
+        System.out.println((Time) row.get("tm"));
+        PGobject obj = new PGobject();
+    }
+
+    @Test
+    public void jackson() throws Exception {
+        Class<?> clazz = Class.forName("com.fasterxml.jackson.databind.ObjectMapper");
+        Object objectMapper = clazz.newInstance();
+        Method method = clazz.getDeclaredMethod("writeValueAsString", Object.class);
+        Object jsonStr = method.invoke(objectMapper, Arrays.asList(1, 2, 3));
+
     }
 
 //    @Test
@@ -191,59 +330,17 @@ public class MyTest {
 //    }
 
     @Test
-    public void TestInert2() throws SQLException {
-//        Transaction.begin();
-        try {
-            int i = Tx.using(() -> {
-                int x = light.insert("test.user", Params.builder()
-                        .put("name", Param.IN("chengyuxing_outer_transaction"))
-                        .put("password", Param.IN("1993510"))
-                        .build());
-                int y = light2.insert("test.user", Params.builder()
-                        .put("name", Param.IN("jackson_outer_transaction"))
-                        .put("password", Param.IN("new Date("))
-                        .build());
-                return x + y;
-            });
-            System.out.println(i);
-//            System.out.println(x + y);
-//            Transaction.commit();
-        } catch (Exception e) {
-//            Transaction.rollback();
-            e.printStackTrace();
-        }
-    }
-
-    @Test
-    public void testInsertBatch() throws SQLException {
-        List<Map<String, Param>> list = new ArrayList<>();
-        for (int i = 0; i < 100; i++) {
-            list.add(Params.builder()
-                    .put("name", Param.IN("batch" + i))
-                    .put("password", Param.IN("123456"))
-                    .build());
-        }
-        int i = light.insert("test.user", list);
-        System.out.println(i);
-    }
-
-    @Test
     public void TestDelete() throws SQLException {
-        int i = light.delete("test.user", Condition.New().where(Filter.like("name", "batch%")));
+        int i = baki.delete("test.user", Condition.where(Filter.like("name", "batch%")));
         System.out.println(i);
     }
 
     @Test
     public void testUpdate() throws SQLException {
-        int i = light.update("test.user t",
-                Params.builder().put("name", Param.IN("SQLFileManager")).build(),
-                Condition.New().where(Filter.eq("id", 5)));
+        int i = baki.update("test.user t",
+                Args.create().add("name", Param.IN("SQLFileManager")),
+                Condition.where(Filter.eq("id", 5)));
         System.out.println(i);
-    }
-
-    @Test
-    public void placeholder() {
-        System.out.println(getPreparedSqlAndIndexedArgNames("select * from test.user t where t.id = #{id} and t.name = #{name}"));
     }
 
     @Test
@@ -256,39 +353,26 @@ public class MyTest {
 
     @Test
     public void ConditionTest() {
-        Condition conditions = Condition.New()//.where(Filter.eq("id", 25))
-                .and(Filter.eq("password", "123456"),
-                        Filter.eq("name", "admin"),
-                        Filter.gtEq("id", 2),
-                        Filter.isNull("name"))
+        ICondition conditions = Condition.where(Filter.eq("id", 25))
                 .and(Filter.isNotNull("name"))
                 .or(Filter.eq("id", 88))
-                .or(Filter.notLike("name", "%admin"))
-                .orderBy("id", Order.DESC)
-                .orderBy("name", Order.ASC);
+                .or(Filter.notLike("name", "%admin"));
 
         System.out.println(conditions);
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void FConditionTest() throws Exception {
-        FCondition<User> f = FCondition.<User>builder().where(FFilter.eq(User::getName, "cyx"))
-                .and(FFilter.eq(User::getPassword, "123456"), FFilter.eq(User::getName, "admin"))
-                .or(FFilter.like(User::getName, "%admin"))
-                .orderBy(User::getAge);
+        FCondition<User> f = FCondition.where(FFilter.eq(User::getName, "cyx"))
+                .and(FFilter.eq(User::getPassword, "123456"))
+                .or(FFilter.like(User::getName, "%admin"));
 
-        System.out.println(f.getParams());
-        System.out.println(f.toString());
+        System.out.println(f.getArgs());
+        System.out.println(f.getSql());
     }
 
     @Test
-    public void ParamsTest() {
-        Map<String, Param> map = Params.builder()
-                .put("name", Param.IN("cyx"))
-                .put("age", Param.IN(26))
-                .put("address", Param.IN("昆明市"))
-                .build();
-        System.out.println(map);
+    public void ArgsTest() {
+
     }
 }

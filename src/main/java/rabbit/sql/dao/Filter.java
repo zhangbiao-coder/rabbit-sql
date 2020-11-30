@@ -1,7 +1,6 @@
 package rabbit.sql.dao;
 
 import rabbit.sql.support.IFilter;
-import rabbit.sql.types.ValueWrap;
 
 /**
  * 条件过滤器
@@ -27,18 +26,6 @@ public final class Filter implements IFilter {
      */
     public static Filter of(String field, String operator, Object value) {
         return new Filter(field, operator, value);
-    }
-
-    /**
-     * 定义一个过滤器
-     *
-     * @param field    字段名
-     * @param operator 操作符
-     * @param value    包装类型的字段值
-     * @return 过滤器
-     */
-    public static Filter ofWrap(String field, String operator, ValueWrap value) {
-        return of(field, operator, value);
     }
 
     /**

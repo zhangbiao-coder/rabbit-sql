@@ -1,19 +1,11 @@
 package rabbit.sql.page.impl;
 
-import rabbit.sql.page.AbstractPageHelper;
+import rabbit.sql.page.PageHelper;
 
 /**
  * PostgreSQL分页工具
  */
-public class PGPageHelper extends AbstractPageHelper {
-
-    private PGPageHelper(int page, int size) {
-        super(page, size);
-    }
-
-    public static PGPageHelper of(int page, int size) {
-        return new PGPageHelper(page, size);
-    }
+public class PGPageHelper extends PageHelper {
 
     public int limit() {
         return getPageSize();

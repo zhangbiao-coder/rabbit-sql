@@ -3,16 +3,11 @@ package rabbit.sql.page;
 /**
  * 抽象分页工具
  */
-public abstract class AbstractPageHelper {
-    private final int pageNumber;
-    private final int pageSize;
+public abstract class PageHelper {
+    private int pageNumber;
+    private int pageSize;
     private int pageCount;
     private int recordCount;
-
-    public AbstractPageHelper(int pageNumber, int pageSize) {
-        this.pageNumber = pageNumber;
-        this.pageSize = pageSize;
-    }
 
     /**
      * 包裹分页的sql
@@ -61,10 +56,14 @@ public abstract class AbstractPageHelper {
     /**
      * 初始化
      *
+     * @param page  当前页
+     * @param size  页大小
      * @param count 记录条数
      */
-    public void init(int count) {
-        this.recordCount = count;
+    public void init(int page, int size, int count) {
+        pageNumber = page;
+        pageSize = size;
+        recordCount = count;
         pageCount = recordCount / pageSize;
         if (recordCount % pageSize != 0) {
             pageCount += 1;
@@ -73,7 +72,7 @@ public abstract class AbstractPageHelper {
 
     @Override
     public String toString() {
-        return "AbstractPageHelper{" +
+        return "PageHelper{" +
                 "pageNumber=" + pageNumber +
                 ", pageSize=" + pageSize +
                 ", pageCount=" + pageCount +
